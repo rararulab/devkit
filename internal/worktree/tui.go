@@ -222,7 +222,7 @@ func newTUIModel(entries []Entry) tuiModel {
 	return m
 }
 
-func entryToRow(e *Entry, selected bool, sizesLoaded bool) table.Row {
+func entryToRow(e *Entry, selected, sizesLoaded bool) table.Row {
 	// Selection indicator column
 	check := " "
 	if selected {
@@ -355,32 +355,30 @@ func (m *tuiModel) computeSizesCmd() tea.Cmd {
 }
 
 func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case dismissToastMsg:
-		return m, m.handleDismissToast(msg)
+		cmd = m.handleDismissToast(msg)
 	case dismissMessageMsg:
-		return m, m.handleDismissMessage(msg)
+		cmd = m.handleDismissMessage(msg)
 	case sizeResultMsg:
-		return m, m.handleSizeResult(msg)
+		cmd = m.handleSizeResult(msg)
 	case deleteResultMsg:
-		return m, m.handleDeleteResult(msg)
+		cmd = m.handleDeleteResult(msg)
 	case pruneResultMsg:
-		return m, m.handlePruneResult(msg)
+		cmd = m.handlePruneResult(msg)
 	case reloadResultMsg:
-		return m, m.handleReloadResult(msg)
+		cmd = m.handleReloadResult(msg)
 	case tea.WindowSizeMsg:
 		m.windowHeight = msg.Height
 		m.table.SetHeight(m.tableHeight())
-		return m, nil
 	case tea.KeyPressMsg:
-		if m.busy {
-			return m, nil
+		if !m.busy {
+			return m.handleKeyPress(msg)
 		}
-		return m.handleKeyPress(msg)
+	default:
+		m.table, cmd = m.table.Update(msg)
 	}
-
-	var cmd tea.Cmd
-	m.table, cmd = m.table.Update(msg)
 	return m, cmd
 }
 
@@ -431,10 +429,7 @@ func (m *tuiModel) handlePruneResult(msg pruneResultMsg) tea.Cmd {
 	if msg.err != nil {
 		return m.pushToast(msg.err.Error())
 	}
-	var cmds []tea.Cmd
-	cmds = append(cmds, m.setMessage("Pruned stale worktree references"))
-	cmds = append(cmds, m.reloadCmd())
-	return tea.Batch(cmds...)
+	return tea.Batch(m.setMessage("Pruned stale worktree references"), m.reloadCmd())
 }
 
 func (m *tuiModel) handleReloadResult(msg reloadResultMsg) tea.Cmd {

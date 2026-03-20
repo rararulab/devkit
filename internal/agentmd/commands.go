@@ -9,8 +9,9 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/rararulab/devkit/internal/config"
 	"github.com/urfave/cli/v3"
+
+	"github.com/rararulab/devkit/internal/config"
 )
 
 // Cmd returns the "check-agent-md" command.

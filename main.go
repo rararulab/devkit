@@ -6,10 +6,11 @@ import (
 	"log"
 	"os"
 
+	"github.com/urfave/cli/v3"
+
 	"github.com/rararulab/devkit/internal/agentmd"
 	"github.com/rararulab/devkit/internal/deps"
 	"github.com/rararulab/devkit/internal/worktree"
-	"github.com/urfave/cli/v3"
 )
 
 func main() {
