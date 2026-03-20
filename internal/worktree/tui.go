@@ -124,7 +124,7 @@ func RunTUI() error {
 	}
 
 	m := newTUIModel(entries)
-	p := tea.NewProgram(m)
+	p := tea.NewProgram(&m)
 	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("TUI error: %w", err)
 	}
@@ -183,8 +183,8 @@ func newTUIModel(entries []Entry) tuiModel {
 	}
 
 	rows := make([]table.Row, len(entries))
-	for i, e := range entries {
-		rows[i] = entryToRow(e, false, false)
+	for i := range entries {
+		rows[i] = entryToRow(&entries[i], false, false)
 	}
 
 	totalWidth := 0
@@ -222,7 +222,7 @@ func newTUIModel(entries []Entry) tuiModel {
 	return m
 }
 
-func entryToRow(e Entry, selected bool, sizesLoaded bool) table.Row {
+func entryToRow(e *Entry, selected bool, sizesLoaded bool) table.Row {
 	// Selection indicator column
 	check := " "
 	if selected {
@@ -330,7 +330,7 @@ func (m *tuiModel) tableHeight() int {
 	return min(rows, 25)
 }
 
-func (m tuiModel) Init() tea.Cmd {
+func (m *tuiModel) Init() tea.Cmd {
 	return m.computeSizesCmd()
 }
 
@@ -354,90 +354,25 @@ func (m *tuiModel) computeSizesCmd() tea.Cmd {
 	}
 }
 
-func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	// Auto-dismiss handlers
 	case dismissToastMsg:
-		for i, t := range m.toasts {
-			if t.id == msg.id {
-				m.toasts = append(m.toasts[:i], m.toasts[i+1:]...)
-				break
-			}
-		}
-		return m, nil
-
+		return m, m.handleDismissToast(msg)
 	case dismissMessageMsg:
-		if msg.seq == m.messageSeq {
-			m.message = ""
-		}
-		return m, nil
-
+		return m, m.handleDismissMessage(msg)
 	case sizeResultMsg:
-		// Discard stale results from a previous generation
-		if msg.generation != m.generation {
-			return m, nil
-		}
-		for i, sz := range msg.sizes {
-			if i < len(m.entries) {
-				m.entries[i].DiskSize = sz
-			}
-		}
-		m.sizesLoaded = true
-		m.refreshRows()
-		return m, nil
-
-	// Async result handlers
+		return m, m.handleSizeResult(msg)
 	case deleteResultMsg:
-		m.busy = false
-		var cmds []tea.Cmd
-		cmds = append(cmds, m.setMessage(fmt.Sprintf("Removed %d worktree(s), freed %s", msg.removed, humanSize(msg.freedBytes))))
-		for _, errText := range msg.errors {
-			cmds = append(cmds, m.pushToast(errText))
-		}
-		reloadCmd := m.reloadCmd()
-		cmds = append(cmds, reloadCmd)
-		return m, tea.Batch(cmds...)
-
+		return m, m.handleDeleteResult(msg)
 	case pruneResultMsg:
-		m.busy = false
-		if msg.err != nil {
-			cmd := m.pushToast(msg.err.Error())
-			return m, cmd
-		}
-		var cmds []tea.Cmd
-		cmds = append(cmds, m.setMessage("Pruned stale worktree references"))
-		reloadCmd := m.reloadCmd()
-		cmds = append(cmds, reloadCmd)
-		return m, tea.Batch(cmds...)
-
+		return m, m.handlePruneResult(msg)
 	case reloadResultMsg:
-		m.busy = false
-		if msg.err != nil {
-			cmd := m.pushToast(msg.err.Error())
-			return m, cmd
-		}
-		m.entries = msg.entries
-		m.selected = make(map[int]bool)
-		m.sizesLoaded = false
-		m.generation++
-		m.refreshRows()
-		m.table.SetHeight(m.tableHeight())
-		// Re-trigger async size computation for the new entries
-		sizeCmd := m.computeSizesCmd()
-		// If no message was set by a prior handler (e.g. deleteResultMsg),
-		// show a brief "Refreshed" note
-		if m.message == "Refreshing..." {
-			return m, tea.Batch(m.setMessage("Refreshed"), sizeCmd)
-		}
-		return m, sizeCmd
-
+		return m, m.handleReloadResult(msg)
 	case tea.WindowSizeMsg:
 		m.windowHeight = msg.Height
 		m.table.SetHeight(m.tableHeight())
 		return m, nil
-
 	case tea.KeyPressMsg:
-		// Ignore keys while busy
 		if m.busy {
 			return m, nil
 		}
@@ -449,8 +384,79 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m *tuiModel) handleDismissToast(msg dismissToastMsg) tea.Cmd {
+	for i, t := range m.toasts {
+		if t.id == msg.id {
+			m.toasts = append(m.toasts[:i], m.toasts[i+1:]...)
+			break
+		}
+	}
+	return nil
+}
+
+func (m *tuiModel) handleDismissMessage(msg dismissMessageMsg) tea.Cmd {
+	if msg.seq == m.messageSeq {
+		m.message = ""
+	}
+	return nil
+}
+
+func (m *tuiModel) handleSizeResult(msg sizeResultMsg) tea.Cmd {
+	if msg.generation != m.generation {
+		return nil
+	}
+	for i, sz := range msg.sizes {
+		if i < len(m.entries) {
+			m.entries[i].DiskSize = sz
+		}
+	}
+	m.sizesLoaded = true
+	m.refreshRows()
+	return nil
+}
+
+func (m *tuiModel) handleDeleteResult(msg deleteResultMsg) tea.Cmd {
+	m.busy = false
+	var cmds []tea.Cmd
+	cmds = append(cmds, m.setMessage(fmt.Sprintf("Removed %d worktree(s), freed %s", msg.removed, humanSize(msg.freedBytes))))
+	for _, errText := range msg.errors {
+		cmds = append(cmds, m.pushToast(errText))
+	}
+	cmds = append(cmds, m.reloadCmd())
+	return tea.Batch(cmds...)
+}
+
+func (m *tuiModel) handlePruneResult(msg pruneResultMsg) tea.Cmd {
+	m.busy = false
+	if msg.err != nil {
+		return m.pushToast(msg.err.Error())
+	}
+	var cmds []tea.Cmd
+	cmds = append(cmds, m.setMessage("Pruned stale worktree references"))
+	cmds = append(cmds, m.reloadCmd())
+	return tea.Batch(cmds...)
+}
+
+func (m *tuiModel) handleReloadResult(msg reloadResultMsg) tea.Cmd {
+	m.busy = false
+	if msg.err != nil {
+		return m.pushToast(msg.err.Error())
+	}
+	m.entries = msg.entries
+	m.selected = make(map[int]bool)
+	m.sizesLoaded = false
+	m.generation++
+	m.refreshRows()
+	m.table.SetHeight(m.tableHeight())
+	sizeCmd := m.computeSizesCmd()
+	if m.message == "Refreshing..." {
+		return tea.Batch(m.setMessage("Refreshed"), sizeCmd)
+	}
+	return sizeCmd
+}
+
 // handleKeyPress processes keyboard input, extracted from Update to reduce cyclomatic complexity.
-func (m tuiModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+func (m *tuiModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
 		m.quitting = true
@@ -585,8 +591,8 @@ func (m *tuiModel) reloadCmd() tea.Cmd {
 
 func (m *tuiModel) refreshRows() {
 	rows := make([]table.Row, len(m.entries))
-	for i, e := range m.entries {
-		rows[i] = entryToRow(e, m.selected[i], m.sizesLoaded)
+	for i := range m.entries {
+		rows[i] = entryToRow(&m.entries[i], m.selected[i], m.sizesLoaded)
 	}
 	m.table.SetRows(rows)
 }
@@ -596,8 +602,7 @@ func helpItem(key, desc string) string {
 	return styleHelpKey.Render(key) + " " + styleHelpDesc.Render(desc)
 }
 
-//nolint:gocritic // hugeParam: value receiver required by tea.Model interface
-func (m tuiModel) View() tea.View {
+func (m *tuiModel) View() tea.View {
 	if m.quitting {
 		return tea.NewView("")
 	}

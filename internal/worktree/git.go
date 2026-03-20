@@ -87,7 +87,7 @@ func List() ([]Entry, error) {
 		e.Prunable = prunable
 		e.Locked = locked
 		e.IsCurrent = isSameOrChild(cwd, e.Path)
-		e.Status = classifyEntry(e, merged)
+		e.Status = classifyEntry(&e, merged)
 		// Populate LastActive for non-prunable entries with existing paths
 		if !e.Prunable {
 			if _, err := os.Stat(e.Path); err == nil {
@@ -202,7 +202,7 @@ func resolveGitDir(worktreePath string) string {
 	return gitdir
 }
 
-func classifyEntry(e Entry, merged map[string]bool) Status {
+func classifyEntry(e *Entry, merged map[string]bool) Status {
 	if e.Prunable {
 		return StatusPrunable
 	}
