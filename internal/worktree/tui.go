@@ -358,11 +358,11 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case dismissToastMsg:
-		cmd = m.handleDismissToast(msg)
+		m.handleDismissToast(msg)
 	case dismissMessageMsg:
-		cmd = m.handleDismissMessage(msg)
+		m.handleDismissMessage(msg)
 	case sizeResultMsg:
-		cmd = m.handleSizeResult(msg)
+		m.handleSizeResult(msg)
 	case deleteResultMsg:
 		cmd = m.handleDeleteResult(msg)
 	case pruneResultMsg:
@@ -382,26 +382,24 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m *tuiModel) handleDismissToast(msg dismissToastMsg) tea.Cmd {
+func (m *tuiModel) handleDismissToast(msg dismissToastMsg) {
 	for i, t := range m.toasts {
 		if t.id == msg.id {
 			m.toasts = append(m.toasts[:i], m.toasts[i+1:]...)
 			break
 		}
 	}
-	return nil
 }
 
-func (m *tuiModel) handleDismissMessage(msg dismissMessageMsg) tea.Cmd {
+func (m *tuiModel) handleDismissMessage(msg dismissMessageMsg) {
 	if msg.seq == m.messageSeq {
 		m.message = ""
 	}
-	return nil
 }
 
-func (m *tuiModel) handleSizeResult(msg sizeResultMsg) tea.Cmd {
+func (m *tuiModel) handleSizeResult(msg sizeResultMsg) {
 	if msg.generation != m.generation {
-		return nil
+		return
 	}
 	for i, sz := range msg.sizes {
 		if i < len(m.entries) {
@@ -410,7 +408,6 @@ func (m *tuiModel) handleSizeResult(msg sizeResultMsg) tea.Cmd {
 	}
 	m.sizesLoaded = true
 	m.refreshRows()
-	return nil
 }
 
 func (m *tuiModel) handleDeleteResult(msg deleteResultMsg) tea.Cmd {
