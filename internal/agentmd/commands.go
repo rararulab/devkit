@@ -49,7 +49,7 @@ func runCheck() error {
 			continue
 		}
 		agentPath := filepath.Join(cratesDir, e.Name(), "AGENT.md")
-		if _, err := os.Stat(agentPath); os.IsNotExist(err) {
+		if _, err := os.Stat(agentPath); err != nil {
 			missing = append(missing, e.Name())
 		}
 	}
@@ -63,7 +63,7 @@ func runCheck() error {
 		}
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Every crate must have an AGENT.md. See the 'AGENT.md Requirements' section in CLAUDE.md.")
-		return cli.Exit("", 1)
+		return cli.Exit(fmt.Sprintf("AGENT.md check failed: %d crate(s) missing", len(missing)), 1)
 	}
 
 	fmt.Println("All crates have AGENT.md.")

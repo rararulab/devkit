@@ -143,6 +143,7 @@ func buildLayerMap(layers map[string][]string) map[string]int {
 	for key, crates := range layers {
 		layer, err := strconv.Atoi(key)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: ignoring non-numeric layer key %q\n", key)
 			continue
 		}
 		for _, c := range crates {

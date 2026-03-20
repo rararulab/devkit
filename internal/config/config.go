@@ -33,7 +33,12 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("getting working directory: %w", err)
 	}
+	return loadFrom(dir)
+}
 
+// loadFrom walks up from startDir looking for .devkit.toml.
+func loadFrom(startDir string) (*Config, error) {
+	dir := startDir
 	for {
 		candidate := filepath.Join(dir, ".devkit.toml")
 		data, err := os.ReadFile(candidate)
@@ -47,7 +52,7 @@ func Load() (*Config, error) {
 
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return nil, fmt.Errorf("no .devkit.toml found (searched from working directory to filesystem root)")
+			return nil, fmt.Errorf("no .devkit.toml found (searched from %s to filesystem root)", startDir)
 		}
 		dir = parent
 	}
