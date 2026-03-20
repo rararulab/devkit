@@ -1,0 +1,29 @@
+repos:
+  - repo: local
+    hooks:
+      - id: go-build
+        name: go build
+        entry: go build ./...
+        language: system
+        pass_filenames: false
+        types: [go]
+
+      - id: goimports
+        name: goimports
+        entry: goimports -local github.com/rararulab/devkit -l -w
+        language: system
+        types: [go]
+
+      - id: golangci-lint
+        name: golangci-lint
+        entry: golangci-lint run --config .golangci.yml
+        language: system
+        pass_filenames: false
+        types: [go]
+
+      - id: go-vet
+        name: go vet
+        entry: go vet ./...
+        language: system
+        pass_filenames: false
+        types: [go]
