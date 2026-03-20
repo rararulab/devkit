@@ -3,6 +3,7 @@ package worktree
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
@@ -42,8 +43,8 @@ type Entry struct {
 	Branch     string // empty for detached HEAD
 	IsMain     bool
 	Prunable   bool
-	Locked     bool      // worktree has a lock file
-	IsCurrent  bool      // worktree is the current working directory
+	Locked     bool // worktree has a lock file
+	IsCurrent  bool // worktree is the current working directory
 	Status     Status
 	LastActive time.Time // last modification time of the worktree directory
 	DiskSize   int64     // total disk usage in bytes
@@ -57,7 +58,7 @@ func (e *Entry) Protected() bool {
 // List parses `git worktree list --porcelain` and returns all entries,
 // enriched with merge status information.
 func List() ([]Entry, error) {
-	out, err := exec.Command("git", "worktree", "list", "--porcelain").Output()
+	out, err := exec.CommandContext(context.Background(), "git", "worktree", "list", "--porcelain").Output()
 	if err != nil {
 		return nil, fmt.Errorf("git worktree list: %w", err)
 	}
@@ -226,7 +227,7 @@ func isSameOrChild(child, parent string) bool {
 
 // MainPath returns the top-level path of the main checkout.
 func MainPath() (string, error) {
-	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	out, err := exec.CommandContext(context.Background(), "git", "rev-parse", "--show-toplevel").Output()
 	if err != nil {
 		return "", fmt.Errorf("git rev-parse --show-toplevel: %w", err)
 	}
@@ -235,7 +236,7 @@ func MainPath() (string, error) {
 
 // MergedBranches returns branch names that are fully merged into main.
 func MergedBranches() (map[string]bool, error) {
-	out, err := exec.Command("git", "branch", "--merged", "main", "--format=%(refname:short)").Output()
+	out, err := exec.CommandContext(context.Background(), "git", "branch", "--merged", "main", "--format=%(refname:short)").Output()
 	if err != nil {
 		return nil, fmt.Errorf("git branch --merged: %w", err)
 	}
@@ -252,7 +253,7 @@ func MergedBranches() (map[string]bool, error) {
 
 // Prune runs `git worktree prune` to clean stale references.
 func Prune() error {
-	if out, err := exec.Command("git", "worktree", "prune").CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(context.Background(), "git", "worktree", "prune").CombinedOutput(); err != nil {
 		return fmt.Errorf("git worktree prune: %w\n%s", err, out)
 	}
 	return nil
@@ -265,7 +266,7 @@ func Remove(path string, force bool) error {
 		args = append(args, "--force")
 	}
 	args = append(args, path)
-	if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(context.Background(), "git", args...).CombinedOutput(); err != nil {
 		return fmt.Errorf("git worktree remove %s: %w\n%s", path, err, out)
 	}
 	return nil
@@ -277,7 +278,7 @@ func DeleteBranch(name string, force bool) error {
 	if force {
 		flag = "-D"
 	}
-	if out, err := exec.Command("git", "branch", flag, name).CombinedOutput(); err != nil {
+	if out, err := exec.CommandContext(context.Background(), "git", "branch", flag, name).CombinedOutput(); err != nil {
 		return fmt.Errorf("git branch %s %s: %w\n%s", flag, name, err, out)
 	}
 	return nil

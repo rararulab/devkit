@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/table"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
 
@@ -55,7 +55,6 @@ var (
 	styleDimPath = lipgloss.NewStyle().Foreground(colorDim)
 
 	styleMessage = lipgloss.NewStyle().Foreground(colorGreen).Bold(true)
-	styleError   = lipgloss.NewStyle().Foreground(colorRed).Bold(true)
 	styleBusy    = lipgloss.NewStyle().Foreground(colorYellow).Bold(true)
 
 	styleHelpKey  = lipgloss.NewStyle().Foreground(colorCyan).Bold(true)
@@ -80,7 +79,7 @@ type deleteResultMsg struct {
 // sizeResultMsg delivers asynchronously computed disk sizes.
 // The generation field prevents stale results from overwriting a newer entry list.
 type sizeResultMsg struct {
-	generation int            // must match tuiModel.generation to apply
+	generation int           // must match tuiModel.generation to apply
 	sizes      map[int]int64 // index → bytes
 }
 
@@ -395,23 +394,27 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, errText := range msg.errors {
 			cmds = append(cmds, m.pushToast(errText))
 		}
-		cmds = append(cmds, m.reloadCmd())
+		reloadCmd := m.reloadCmd()
+		cmds = append(cmds, reloadCmd)
 		return m, tea.Batch(cmds...)
 
 	case pruneResultMsg:
 		m.busy = false
 		if msg.err != nil {
-			return m, m.pushToast(msg.err.Error())
+			cmd := m.pushToast(msg.err.Error())
+			return m, cmd
 		}
 		var cmds []tea.Cmd
 		cmds = append(cmds, m.setMessage("Pruned stale worktree references"))
-		cmds = append(cmds, m.reloadCmd())
+		reloadCmd := m.reloadCmd()
+		cmds = append(cmds, reloadCmd)
 		return m, tea.Batch(cmds...)
 
 	case reloadResultMsg:
 		m.busy = false
 		if msg.err != nil {
-			return m, m.pushToast(msg.err.Error())
+			cmd := m.pushToast(msg.err.Error())
+			return m, cmd
 		}
 		m.entries = msg.entries
 		m.selected = make(map[int]bool)
@@ -438,74 +441,85 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.busy {
 			return m, nil
 		}
-		switch msg.String() {
-		case "q", "ctrl+c":
-			m.quitting = true
-			return m, tea.Quit
-
-		case "space":
-			// Toggle selection (skip protected worktrees)
-			idx := m.table.Cursor()
-			if idx < len(m.entries) && !m.entries[idx].Protected() {
-				wasSelected := m.selected[idx]
-				m.selected[idx] = !wasSelected
-				if wasSelected {
-					delete(m.selected, idx)
-				} else {
-					// Auto-advance cursor when selecting
-					m.table.MoveDown(1)
-				}
-				m.refreshRows()
-			}
-			return m, nil
-
-		case "a":
-			// Select all merged (skip protected)
-			for i, e := range m.entries {
-				if e.Status == StatusMerged && !e.Protected() {
-					m.selected[i] = true
-				}
-			}
-			m.refreshRows()
-			return m, nil
-
-		case "d":
-			// Delete selected worktrees (force)
-			return m, m.deleteSelectedCmd(true)
-
-		case "c":
-			// Clean selected merged worktrees
-			return m, m.deleteSelectedCmd(false)
-
-		case "C":
-			// Clean ALL merged worktrees (skip protected)
-			for i, e := range m.entries {
-				if e.Status == StatusMerged && !e.Protected() {
-					m.selected[i] = true
-				}
-			}
-			return m, m.deleteSelectedCmd(false)
-
-		case "p":
-			// Prune stale references
-			m.busy = true
-			m.message = "Pruning..."
-			return m, func() tea.Msg {
-				err := Prune()
-				return pruneResultMsg{err: err}
-			}
-
-		case "r":
-			// Refresh list
-			m.busy = true
-			m.message = "Refreshing..."
-			return m, m.reloadCmd()
-		}
+		return m.handleKeyPress(msg)
 	}
 
 	var cmd tea.Cmd
 	m.table, cmd = m.table.Update(msg)
 	return m, cmd
+}
+
+// handleKeyPress processes keyboard input, extracted from Update to reduce cyclomatic complexity.
+func (m tuiModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "ctrl+c":
+		m.quitting = true
+		return m, tea.Quit
+
+	case "space":
+		// Toggle selection (skip protected worktrees)
+		idx := m.table.Cursor()
+		if idx < len(m.entries) && !m.entries[idx].Protected() {
+			wasSelected := m.selected[idx]
+			m.selected[idx] = !wasSelected
+			if wasSelected {
+				delete(m.selected, idx)
+			} else {
+				// Auto-advance cursor when selecting
+				m.table.MoveDown(1)
+			}
+			m.refreshRows()
+		}
+		return m, nil
+
+	case "a":
+		// Select all merged (skip protected)
+		for i, e := range m.entries {
+			if e.Status == StatusMerged && !e.Protected() {
+				m.selected[i] = true
+			}
+		}
+		m.refreshRows()
+		return m, nil
+
+	case "d":
+		// Delete selected worktrees (force)
+		cmd := m.deleteSelectedCmd(true)
+		return m, cmd
+
+	case "c":
+		// Clean selected merged worktrees
+		cmd := m.deleteSelectedCmd(false)
+		return m, cmd
+
+	case "C":
+		// Clean ALL merged worktrees (skip protected)
+		for i, e := range m.entries {
+			if e.Status == StatusMerged && !e.Protected() {
+				m.selected[i] = true
+			}
+		}
+		cmd := m.deleteSelectedCmd(false)
+		return m, cmd
+
+	case "p":
+		// Prune stale references
+		m.busy = true
+		m.message = "Pruning..."
+		return m, func() tea.Msg {
+			err := Prune()
+			return pruneResultMsg{err: err}
+		}
+
+	case "r":
+		// Refresh list
+		m.busy = true
+		m.message = "Refreshing..."
+		cmd := m.reloadCmd()
+		return m, cmd
+	}
+
+	return m, nil
 }
 
 // deleteSelectedCmd returns a tea.Cmd that removes selected worktrees in the background.
@@ -582,6 +596,7 @@ func helpItem(key, desc string) string {
 	return styleHelpKey.Render(key) + " " + styleHelpDesc.Render(desc)
 }
 
+//nolint:gocritic // hugeParam: value receiver required by tea.Model interface
 func (m tuiModel) View() tea.View {
 	if m.quitting {
 		return tea.NewView("")

@@ -48,7 +48,7 @@ func Cmd() *cli.Command {
 }
 
 func runList() error {
-	out, err := exec.Command("git", "worktree", "list").CombinedOutput()
+	out, err := exec.CommandContext(context.Background(), "git", "worktree", "list").CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git worktree list: %w\n%s", err, out)
 	}
@@ -134,7 +134,9 @@ func runNuke() error {
 		fmt.Printf("Removing: %s\n", e.Path)
 		if err := Remove(e.Path, true); err != nil {
 			fmt.Fprintf(os.Stderr, "  warning: %s — cleaning up manually\n", err)
-			os.RemoveAll(e.Path)
+			if removeErr := os.RemoveAll(e.Path); removeErr != nil {
+				fmt.Fprintf(os.Stderr, "  warning: manual cleanup failed: %s\n", removeErr)
+			}
 		}
 		if e.Branch != "" {
 			_ = DeleteBranch(e.Branch, true)

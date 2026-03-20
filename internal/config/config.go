@@ -22,7 +22,7 @@ type AgentMDConfig struct {
 
 // DepsConfig controls the check-deps command.
 type DepsConfig struct {
-	CratesDir string            `toml:"crates_dir"`
+	CratesDir string              `toml:"crates_dir"`
 	Layers    map[string][]string `toml:"layers"`
 }
 
