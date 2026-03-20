@@ -270,16 +270,15 @@ func parseCrateDeps(tomlPath string, workspaceCrates map[string]bool) (name stri
 		return "", nil, fmt.Errorf("no package name found in %s", tomlPath)
 	}
 
-	var deps []string
 	for _, section := range []map[string]any{crate.Dependencies, crate.BuildDependencies} {
-		for name, val := range section {
-			if !workspaceCrates[name] {
+		for depName, val := range section {
+			if !workspaceCrates[depName] {
 				continue
 			}
 			if tbl, ok := val.(map[string]any); ok {
 				if ws, exists := tbl["workspace"]; exists {
 					if b, ok := ws.(bool); ok && b {
-						deps = append(deps, name)
+						deps = append(deps, depName)
 					}
 				}
 			}
