@@ -50,7 +50,7 @@ type Entry struct {
 }
 
 // Protected returns true if the worktree cannot be deleted.
-func (e Entry) Protected() bool {
+func (e *Entry) Protected() bool {
 	return e.IsMain || e.Locked || e.IsCurrent
 }
 

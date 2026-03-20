@@ -255,7 +255,7 @@ type crateCargo struct {
 
 // parseCrateDeps extracts the package name and workspace crate dependencies
 // from a crate's Cargo.toml file.
-func parseCrateDeps(tomlPath string, workspaceCrates map[string]bool) (string, []string, error) {
+func parseCrateDeps(tomlPath string, workspaceCrates map[string]bool) (name string, deps []string, err error) {
 	data, err := os.ReadFile(tomlPath)
 	if err != nil {
 		return "", nil, err
