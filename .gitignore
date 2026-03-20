@@ -6,6 +6,11 @@ bin/
 coverage*.out
 coverage*.html
 
+# Ralph (runtime state — prd.json and CLAUDE.md are tracked)
+scripts/ralph/progress.txt
+scripts/ralph/archive/
+scripts/ralph/.last-branch
+
 # IDE
 .idea/
 .vscode/

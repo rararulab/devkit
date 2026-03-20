@@ -1,0 +1,90 @@
+{
+  "project": "devkit",
+  "branchName": "ralph/codebase-hardening",
+  "description": "Codebase hardening — fix bugs, improve error handling, add test coverage",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Fix bugs in agentmd and deps packages",
+      "description": "Fix os.IsNotExist too narrow in agentmd, empty cli.Exit message, and silent strconv.Atoi skip in deps.",
+      "acceptanceCriteria": [
+        "agentmd/commands.go: os.Stat checks err != nil (not just IsNotExist)",
+        "agentmd/commands.go: cli.Exit includes descriptive error message",
+        "deps/commands.go: buildLayerMap logs warning for non-numeric layer keys",
+        "Lint passes (just lint)",
+        "Build passes (go build ./...)"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Improve error handling in worktree package",
+      "description": "Stop swallowing errors in worktree cleanup operations; add context timeouts to exec calls.",
+      "acceptanceCriteria": [
+        "commands.go runNuke: log DeleteBranch and Prune errors to stderr instead of discarding",
+        "tui.go deleteSelectedCmd: collect and surface errors as toast messages",
+        "All exec.CommandContext calls use a 30s timeout context instead of context.Background()",
+        "Lint passes (just lint)",
+        "Build passes (go build ./...)"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Add unit tests for internal/config",
+      "description": "Add tests for config loading, directory walk-up, and TOML parsing.",
+      "acceptanceCriteria": [
+        "config_test.go with tests for Load() happy path, missing file, and invalid TOML",
+        "Tests pass with race detector (just test)",
+        "Lint passes (just lint)"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Add unit tests for internal/deps",
+      "description": "Add tests for buildLayerMap, parseCrateDeps, and violation detection logic.",
+      "acceptanceCriteria": [
+        "deps_test.go with tests for buildLayerMap, parseCrateDeps, and findWorkspaceRoot",
+        "Tests cover: valid layers, invalid keys, empty deps, dependency extraction",
+        "Tests pass with race detector (just test)",
+        "Lint passes (just lint)"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Add unit tests for internal/agentmd",
+      "description": "Add tests for AGENT.md presence checking logic.",
+      "acceptanceCriteria": [
+        "agentmd_test.go with tests for runCheck: all present, some missing, empty dir",
+        "Tests pass with race detector (just test)",
+        "Lint passes (just lint)"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Add unit tests for internal/worktree/git.go",
+      "description": "Add tests for pure functions: dirSize, isSameOrChild, lastActiveTime, classifyEntry.",
+      "acceptanceCriteria": [
+        "git_test.go with tests for dirSize, isSameOrChild, lastActiveTime",
+        "Tests pass with race detector (just test)",
+        "Lint passes (just lint)"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
