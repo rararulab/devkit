@@ -13,6 +13,14 @@ import (
 	"time"
 )
 
+// gitTimeout is the maximum time to wait for any single git operation.
+const gitTimeout = 30 * time.Second
+
+// gitContext returns a context with the standard git timeout.
+func gitContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), gitTimeout)
+}
+
 // Status describes the state of a worktree entry.
 type Status int
 
@@ -48,6 +56,9 @@ type Entry struct {
 	Status     Status
 	LastActive time.Time // last modification time of the worktree directory
 	DiskSize   int64     // total disk usage in bytes
+	Dirty      int       // number of uncommitted changes (staged + unstaged)
+	Ahead      int       // commits ahead of tracking branch
+	Behind     int       // commits behind tracking branch
 }
 
 // Protected returns true if the worktree cannot be deleted.
@@ -58,7 +69,9 @@ func (e *Entry) Protected() bool {
 // List parses `git worktree list --porcelain` and returns all entries,
 // enriched with merge status information.
 func List() ([]Entry, error) {
-	out, err := exec.CommandContext(context.Background(), "git", "worktree", "list", "--porcelain").Output()
+	ctx, cancel := gitContext()
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "git", "worktree", "list", "--porcelain").Output()
 	if err != nil {
 		return nil, fmt.Errorf("git worktree list: %w", err)
 	}
@@ -88,10 +101,12 @@ func List() ([]Entry, error) {
 		e.Locked = locked
 		e.IsCurrent = isSameOrChild(cwd, e.Path)
 		e.Status = classifyEntry(&e, merged)
-		// Populate LastActive for non-prunable entries with existing paths
+		// Populate computed fields for non-prunable entries with existing paths
 		if !e.Prunable {
 			if _, err := os.Stat(e.Path); err == nil {
 				e.LastActive = lastActiveTime(e.Path)
+				e.Dirty = dirtyCount(e.Path)
+				e.Ahead, e.Behind = aheadBehind(e.Path)
 			}
 		}
 		return e
@@ -227,7 +242,9 @@ func isSameOrChild(child, parent string) bool {
 
 // MainPath returns the top-level path of the main checkout.
 func MainPath() (string, error) {
-	out, err := exec.CommandContext(context.Background(), "git", "rev-parse", "--show-toplevel").Output()
+	ctx, cancel := gitContext()
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel").Output()
 	if err != nil {
 		return "", fmt.Errorf("git rev-parse --show-toplevel: %w", err)
 	}
@@ -236,7 +253,9 @@ func MainPath() (string, error) {
 
 // MergedBranches returns branch names that are fully merged into main.
 func MergedBranches() (map[string]bool, error) {
-	out, err := exec.CommandContext(context.Background(), "git", "branch", "--merged", "main", "--format=%(refname:short)").Output()
+	ctx, cancel := gitContext()
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "git", "branch", "--merged", "main", "--format=%(refname:short)").Output()
 	if err != nil {
 		return nil, fmt.Errorf("git branch --merged: %w", err)
 	}
@@ -251,9 +270,48 @@ func MergedBranches() (map[string]bool, error) {
 	return m, nil
 }
 
+// dirtyCount returns the number of uncommitted changes in a worktree.
+func dirtyCount(worktreePath string) int {
+	ctx, cancel := gitContext()
+	defer cancel()
+	out, err := exec.CommandContext(ctx,
+		"git", "-C", worktreePath, "status", "--porcelain",
+	).Output()
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line != "" {
+			count++
+		}
+	}
+	return count
+}
+
+// aheadBehind returns how many commits a branch is ahead/behind its tracking branch.
+func aheadBehind(worktreePath string) (ahead, behind int) {
+	ctx, cancel := gitContext()
+	defer cancel()
+	out, err := exec.CommandContext(ctx,
+		"git", "-C", worktreePath, "rev-list", "--left-right", "--count", "@{upstream}...HEAD",
+	).Output()
+	if err != nil {
+		return 0, 0
+	}
+	parts := strings.Fields(strings.TrimSpace(string(out)))
+	if len(parts) == 2 {
+		_, _ = fmt.Sscanf(parts[0], "%d", &behind)
+		_, _ = fmt.Sscanf(parts[1], "%d", &ahead)
+	}
+	return ahead, behind
+}
+
 // Prune runs `git worktree prune` to clean stale references.
 func Prune() error {
-	if out, err := exec.CommandContext(context.Background(), "git", "worktree", "prune").CombinedOutput(); err != nil {
+	ctx, cancel := gitContext()
+	defer cancel()
+	if out, err := exec.CommandContext(ctx, "git", "worktree", "prune").CombinedOutput(); err != nil {
 		return fmt.Errorf("git worktree prune: %w\n%s", err, out)
 	}
 	return nil
@@ -266,7 +324,9 @@ func Remove(path string, force bool) error {
 		args = append(args, "--force")
 	}
 	args = append(args, path)
-	if out, err := exec.CommandContext(context.Background(), "git", args...).CombinedOutput(); err != nil {
+	ctx, cancel := gitContext()
+	defer cancel()
+	if out, err := exec.CommandContext(ctx, "git", args...).CombinedOutput(); err != nil {
 		return fmt.Errorf("git worktree remove %s: %w\n%s", path, err, out)
 	}
 	return nil
@@ -278,7 +338,9 @@ func DeleteBranch(name string, force bool) error {
 	if force {
 		flag = "-D"
 	}
-	if out, err := exec.CommandContext(context.Background(), "git", "branch", flag, name).CombinedOutput(); err != nil {
+	ctx, cancel := gitContext()
+	defer cancel()
+	if out, err := exec.CommandContext(ctx, "git", "branch", flag, name).CombinedOutput(); err != nil {
 		return fmt.Errorf("git branch %s %s: %w\n%s", flag, name, err, out)
 	}
 	return nil

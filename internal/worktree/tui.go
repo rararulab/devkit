@@ -114,6 +114,9 @@ type tuiModel struct {
 	sizesLoaded  bool    // true once async size computation has completed
 	generation   int     // incremented on each reload, guards against stale sizeResultMsg
 	windowHeight int     // terminal height from tea.WindowSizeMsg
+	showHelp     bool    // toggle extended help overlay
+	confirmForce bool    // true = pending force-delete confirmation
+	confirmClean bool    // true = pending clean confirmation
 }
 
 // RunTUI launches the interactive worktree manager.
@@ -175,9 +178,10 @@ func newTUIModel(entries []Entry) tuiModel {
 	// Wider columns to accommodate ANSI color codes in cell values
 	columns := []table.Column{
 		{Title: " ", Width: 4},
-		{Title: "Path", Width: 36},
-		{Title: "Branch", Width: 28},
+		{Title: "Path", Width: 32},
+		{Title: "Branch", Width: 24},
 		{Title: "Status", Width: 18},
+		{Title: "Dirty", Width: 8},
 		{Title: "Last Active", Width: 12},
 		{Title: "Size", Width: 8},
 	}
@@ -263,6 +267,14 @@ func entryToRow(e *Entry, selected, sizesLoaded bool) table.Row {
 	}
 	status := stStyle.Render(statusText)
 
+	// Dirty column — highlight if there are uncommitted changes
+	var dirty string
+	if e.Dirty > 0 {
+		dirty = lipgloss.NewStyle().Foreground(colorRed).Bold(true).Render(fmt.Sprintf("%d", e.Dirty))
+	} else {
+		dirty = styleDimPath.Render("-")
+	}
+
 	// Last active column
 	lastActive := styleDimPath.Render(relativeTime(e.LastActive))
 
@@ -276,7 +288,7 @@ func entryToRow(e *Entry, selected, sizesLoaded bool) table.Row {
 		size = styleDimPath.Render(humanSize(e.DiskSize))
 	}
 
-	return table.Row{check, path, branch, status, lastActive, size}
+	return table.Row{check, path, branch, status, dirty, lastActive, size}
 }
 
 func shortenPath(p string) string {
@@ -449,59 +461,67 @@ func (m *tuiModel) handleReloadResult(msg reloadResultMsg) tea.Cmd {
 
 // handleKeyPress processes keyboard input, extracted from Update to reduce cyclomatic complexity.
 func (m *tuiModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
+	key := msg.String()
+
+	// Handle confirmation prompts first
+	if m.confirmForce || m.confirmClean {
+		return m.handleConfirmKey(key)
+	}
+
+	// Help overlay dismissal
+	if m.showHelp {
+		m.showHelp = false
+		return m, nil
+	}
+
+	switch key {
 	case "q", "ctrl+c":
 		m.quitting = true
 		return m, tea.Quit
 
+	case "j", "down":
+		m.table.MoveDown(1)
+		return m, nil
+	case "k", "up":
+		m.table.MoveUp(1)
+		return m, nil
+	case "g":
+		m.table.GotoTop()
+		return m, nil
+	case "G":
+		m.table.GotoBottom()
+		return m, nil
+
+	case "enter":
+		cmd := m.showSelectedPath()
+		return m, cmd
+
+	case "?":
+		m.showHelp = !m.showHelp
+		return m, nil
+
 	case "space":
-		// Toggle selection (skip protected worktrees)
-		idx := m.table.Cursor()
-		if idx < len(m.entries) && !m.entries[idx].Protected() {
-			wasSelected := m.selected[idx]
-			m.selected[idx] = !wasSelected
-			if wasSelected {
-				delete(m.selected, idx)
-			} else {
-				// Auto-advance cursor when selecting
-				m.table.MoveDown(1)
-			}
-			m.refreshRows()
-		}
+		m.toggleSelection()
 		return m, nil
 
 	case "a":
-		// Select all merged (skip protected)
-		for i, e := range m.entries {
-			if e.Status == StatusMerged && !e.Protected() {
-				m.selected[i] = true
-			}
-		}
-		m.refreshRows()
+		m.selectAllMerged()
 		return m, nil
 
 	case "d":
-		// Delete selected worktrees (force)
-		cmd := m.deleteSelectedCmd(true)
-		return m, cmd
+		m.requestDelete(true)
+		return m, nil
 
 	case "c":
-		// Clean selected merged worktrees
-		cmd := m.deleteSelectedCmd(false)
-		return m, cmd
+		m.requestDelete(false)
+		return m, nil
 
 	case "C":
-		// Clean ALL merged worktrees (skip protected)
-		for i, e := range m.entries {
-			if e.Status == StatusMerged && !e.Protected() {
-				m.selected[i] = true
-			}
-		}
-		cmd := m.deleteSelectedCmd(false)
-		return m, cmd
+		m.selectAllMerged()
+		m.requestDelete(false)
+		return m, nil
 
 	case "p":
-		// Prune stale references
 		m.busy = true
 		m.message = "Pruning..."
 		return m, func() tea.Msg {
@@ -510,7 +530,6 @@ func (m *tuiModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "r":
-		// Refresh list
 		m.busy = true
 		m.message = "Refreshing..."
 		cmd := m.reloadCmd()
@@ -518,6 +537,75 @@ func (m *tuiModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// handleConfirmKey handles y/n input during delete confirmation.
+func (m *tuiModel) handleConfirmKey(key string) (tea.Model, tea.Cmd) {
+	force := m.confirmForce
+	m.confirmForce = false
+	m.confirmClean = false
+
+	switch key {
+	case "y", "Y":
+		cmd := m.deleteSelectedCmd(force)
+		return m, cmd
+	default:
+		m.selected = make(map[int]bool)
+		m.refreshRows()
+		m.message = ""
+		return m, nil
+	}
+}
+
+// toggleSelection toggles the selection state of the cursor entry.
+func (m *tuiModel) toggleSelection() {
+	idx := m.table.Cursor()
+	if idx < len(m.entries) && !m.entries[idx].Protected() {
+		if m.selected[idx] {
+			delete(m.selected, idx)
+		} else {
+			m.selected[idx] = true
+			m.table.MoveDown(1)
+		}
+		m.refreshRows()
+	}
+}
+
+// selectAllMerged selects all merged, non-protected worktrees.
+func (m *tuiModel) selectAllMerged() {
+	for i, e := range m.entries {
+		if e.Status == StatusMerged && !e.Protected() {
+			m.selected[i] = true
+		}
+	}
+	m.refreshRows()
+}
+
+// requestDelete enters confirmation mode before deleting selected worktrees.
+func (m *tuiModel) requestDelete(force bool) {
+	count := len(m.selected)
+	if count == 0 {
+		return
+	}
+	if force {
+		m.confirmForce = true
+	} else {
+		m.confirmClean = true
+	}
+	action := "clean"
+	if force {
+		action = "force-delete"
+	}
+	m.message = fmt.Sprintf("%s %d worktree(s)? (y/n)", action, count)
+}
+
+// showSelectedPath displays the full path of the cursor entry in the status bar.
+func (m *tuiModel) showSelectedPath() tea.Cmd {
+	idx := m.table.Cursor()
+	if idx >= len(m.entries) {
+		return nil
+	}
+	return m.setMessage(m.entries[idx].Path)
 }
 
 // deleteSelectedCmd returns a tea.Cmd that removes selected worktrees in the background.
@@ -563,11 +651,15 @@ func (m *tuiModel) deleteSelectedCmd(force bool) tea.Cmd {
 			}
 			freedBytes += sz
 			if t.branch != "" {
-				_ = DeleteBranch(t.branch, force)
+				if branchErr := DeleteBranch(t.branch, force); branchErr != nil {
+					errors = append(errors, fmt.Sprintf("branch %s: %s", t.branch, branchErr))
+				}
 			}
 			removed++
 		}
-		_ = Prune()
+		if pruneErr := Prune(); pruneErr != nil {
+			errors = append(errors, fmt.Sprintf("prune: %s", pruneErr))
+		}
 		return deleteResultMsg{removed: removed, errors: errors, freedBytes: freedBytes}
 	}
 }
@@ -592,6 +684,35 @@ func (m *tuiModel) refreshRows() {
 // helpItem renders a single "key desc" help entry with styled key.
 func helpItem(key, desc string) string {
 	return styleHelpKey.Render(key) + " " + styleHelpDesc.Render(desc)
+}
+
+// renderFullHelp returns the extended help overlay text.
+func (m *tuiModel) renderFullHelp() string {
+	_ = m // receiver used for consistency
+	title := styleTitle.Render("Keyboard Shortcuts")
+	lines := []struct{ key, desc string }{
+		{"j/k ↑/↓", "Move cursor up/down"},
+		{"g/G", "Jump to top/bottom"},
+		{"space", "Toggle selection on cursor entry"},
+		{"a", "Select all merged worktrees"},
+		{"enter", "Show full path of cursor entry"},
+		{"c", "Clean (remove) selected worktrees"},
+		{"C", "Clean ALL merged worktrees at once"},
+		{"d", "Force-delete selected worktrees"},
+		{"p", "Prune stale worktree references"},
+		{"r", "Refresh worktree list"},
+		{"?", "Toggle this help"},
+		{"q", "Quit"},
+	}
+	var b strings.Builder
+	b.WriteString("  " + title + "\n\n")
+	for _, l := range lines {
+		fmt.Fprintf(&b, "  %s  %s\n",
+			styleHelpKey.Render(fmt.Sprintf("%-12s", l.key)),
+			styleHelpDesc.Render(l.desc))
+	}
+	b.WriteString("\n  " + styleHelpDesc.Render("Press any key to dismiss") + "\n")
+	return b.String()
 }
 
 func (m *tuiModel) View() tea.View {
@@ -633,15 +754,19 @@ func (m *tuiModel) View() tea.View {
 		b.WriteString("\n")
 	}
 
-	// Help bar — grouped by function
-	sep := styleHelpSep.Render(" · ")
-	helpLine := strings.Join([]string{
-		helpItem("space", "select") + sep + helpItem("a", "all merged"),
-		helpItem("c", "clean") + sep + helpItem("C", "clean all") + sep + helpItem("d", "force del"),
-		helpItem("p", "prune") + sep + helpItem("r", "refresh") + sep + helpItem("q", "quit"),
-	}, styleHelpSep.Render("  │  "))
-	b.WriteString("  " + helpLine)
-	b.WriteString("\n")
+	// Help bar or full help overlay
+	if m.showHelp {
+		b.WriteString(m.renderFullHelp())
+	} else {
+		sep := styleHelpSep.Render(" · ")
+		helpLine := strings.Join([]string{
+			helpItem("space", "select") + sep + helpItem("a", "all merged"),
+			helpItem("c", "clean") + sep + helpItem("d", "force del"),
+			helpItem("enter", "path") + sep + helpItem("?", "help") + sep + helpItem("q", "quit"),
+		}, styleHelpSep.Render("  │  "))
+		b.WriteString("  " + helpLine)
+		b.WriteString("\n")
+	}
 
 	v := tea.NewView(b.String())
 	v.AltScreen = true

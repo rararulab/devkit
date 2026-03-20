@@ -5,7 +5,8 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
+	"strings"
+	"text/tabwriter"
 
 	"github.com/urfave/cli/v3"
 )
@@ -32,8 +33,15 @@ func Cmd() *cli.Command {
 			{
 				Name:  "clean",
 				Usage: "Remove worktrees whose branches are merged into main (non-interactive)",
-				Action: func(_ context.Context, _ *cli.Command) error {
-					return runClean()
+				Flags: []cli.Flag{
+					&cli.BoolFlag{
+						Name:    "dry-run",
+						Aliases: []string{"n"},
+						Usage:   "Show what would be removed without actually removing",
+					},
+				},
+				Action: func(_ context.Context, cmd *cli.Command) error {
+					return runClean(cmd.Bool("dry-run"))
 				},
 			},
 			{
@@ -48,17 +56,70 @@ func Cmd() *cli.Command {
 }
 
 func runList() error {
-	out, err := exec.CommandContext(context.Background(), "git", "worktree", "list").CombinedOutput()
+	entries, err := List()
 	if err != nil {
-		return fmt.Errorf("git worktree list: %w\n%s", err, out)
+		return err
 	}
-	fmt.Print(string(out))
-	return nil
+	if len(entries) == 0 {
+		fmt.Println("No worktrees found.")
+		return nil
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "PATH\tBRANCH\tSTATUS\tDIRTY\tSYNC\tLAST ACTIVE\tSIZE")
+
+	for i := range entries {
+		e := &entries[i]
+
+		branch := e.Branch
+		if branch == "" {
+			branch = "(detached)"
+		}
+
+		status := e.Status.String()
+		var tags []string
+		if e.IsMain {
+			tags = append(tags, "main")
+		}
+		if e.IsCurrent {
+			tags = append(tags, "cwd")
+		}
+		if e.Locked {
+			tags = append(tags, "locked")
+		}
+		if len(tags) > 0 {
+			status += " [" + strings.Join(tags, ",") + "]"
+		}
+
+		dirty := "-"
+		if e.Dirty > 0 {
+			dirty = fmt.Sprintf("%d changed", e.Dirty)
+		}
+
+		sync := "ok"
+		if e.Ahead > 0 && e.Behind > 0 {
+			sync = fmt.Sprintf("+%d/-%d", e.Ahead, e.Behind)
+		} else if e.Ahead > 0 {
+			sync = fmt.Sprintf("+%d ahead", e.Ahead)
+		} else if e.Behind > 0 {
+			sync = fmt.Sprintf("-%d behind", e.Behind)
+		}
+
+		size := humanSize(dirSize(e.Path))
+		lastActive := relativeTime(e.LastActive)
+
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			shortenPath(e.Path), branch, status, dirty, sync, lastActive, size)
+	}
+
+	return w.Flush()
 }
 
-func runClean() error {
-	if err := Prune(); err != nil {
-		return err
+func runClean(dryRun bool) error {
+	if !dryRun {
+		if err := Prune(); err != nil {
+			return err
+		}
 	}
 
 	mainPath, err := MainPath()
@@ -82,12 +143,26 @@ func runClean() error {
 
 	branchHandled := make(map[string]bool)
 	removed := 0
+	prefix := ""
+	if dryRun {
+		prefix = "(dry-run) "
+	}
 
 	for _, e := range entries {
 		if e.Path == mainPath || e.Branch == "" || !merged[e.Branch] {
 			continue
 		}
-		fmt.Printf("Removing worktree: %s (branch: %s)\n", e.Path, e.Branch)
+		if e.Dirty > 0 {
+			fmt.Fprintf(os.Stderr, "  skipping %s: %d uncommitted change(s)\n", e.Branch, e.Dirty)
+			continue
+		}
+		fmt.Printf("%sRemoving worktree: %s (branch: %s, size: %s)\n",
+			prefix, shortenPath(e.Path), e.Branch, humanSize(dirSize(e.Path)))
+		if dryRun {
+			branchHandled[e.Branch] = true
+			removed++
+			continue
+		}
 		if err := Remove(e.Path, false); err != nil {
 			fmt.Fprintf(os.Stderr, "  warning: %s\n", err)
 			continue
@@ -103,7 +178,11 @@ func runClean() error {
 		if branchHandled[branch] {
 			continue
 		}
-		fmt.Printf("Deleting merged branch: %s (no worktree)\n", branch)
+		fmt.Printf("%sDeleting merged branch: %s (no worktree)\n", prefix, branch)
+		if dryRun {
+			removed++
+			continue
+		}
 		if err := DeleteBranch(branch, false); err != nil {
 			fmt.Fprintf(os.Stderr, "  warning: %s\n", err)
 			continue
@@ -139,12 +218,16 @@ func runNuke() error {
 			}
 		}
 		if e.Branch != "" {
-			_ = DeleteBranch(e.Branch, true)
+			if branchErr := DeleteBranch(e.Branch, true); branchErr != nil {
+				fmt.Fprintf(os.Stderr, "  warning: branch delete: %s\n", branchErr)
+			}
 		}
 		removed++
 	}
 
-	_ = Prune()
+	if pruneErr := Prune(); pruneErr != nil {
+		fmt.Fprintf(os.Stderr, "  warning: prune: %s\n", pruneErr)
+	}
 	fmt.Printf("Removed %d worktree(s).\n", removed)
 	return nil
 }
