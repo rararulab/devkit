@@ -14,8 +14,9 @@ import (
 
 func main() {
 	cmd := &cli.Command{
-		Name:  "devkit",
-		Usage: "Developer toolkit for rara",
+		Name:    "devkit",
+		Usage:   "Developer toolkit for rara",
+		Version: Version,
 		Commands: []*cli.Command{
 			agentmd.Cmd(),
 			worktree.Cmd(),

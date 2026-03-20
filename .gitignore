@@ -2,6 +2,10 @@
 devkit
 bin/
 
+# Coverage
+coverage*.out
+coverage*.html
+
 # IDE
 .idea/
 .vscode/
