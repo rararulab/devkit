@@ -42,6 +42,11 @@ commit_parsers = [
     { message = "^chore|^ci", group = "⚙️ Miscellaneous" },
     { message = "^revert", group = "◀️ Revert" },
 ]
+# Bump rules for automatic version detection
+[bump]
+features_always_bump_minor = true
+breaking_always_bump_major = true
+
 protect_breaking_commits = false
 filter_commits = false
 topo_order = false
