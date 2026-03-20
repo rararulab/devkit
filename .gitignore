@@ -1,0 +1,8 @@
+# Binary
+devkit
+bin/
+
+# IDE
+.idea/
+.vscode/
+*.swp
