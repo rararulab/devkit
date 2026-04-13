@@ -191,19 +191,18 @@ func lastActiveTime(path string) time.Time {
 }
 
 // resolveGitDir returns the path to the actual git directory for a worktree.
-// For the main checkout, this is <path>/.git. For linked worktrees, .git is a
-// file containing "gitdir: <path>" pointing to the real git metadata.
+// The worktree's .git metadata may be either a directory or a file containing
+// "gitdir: <path>" that points to the actual git metadata directory.
 func resolveGitDir(worktreePath string) string {
 	dotGit := filepath.Join(worktreePath, ".git")
 	info, err := os.Stat(dotGit)
 	if err != nil {
 		return dotGit
 	}
-	// Main checkout: .git is a directory
+	// .git can be a directory or a file pointing at the real git metadata.
 	if info.IsDir() {
 		return dotGit
 	}
-	// Linked worktree: .git is a file with "gitdir: <path>"
 	data, err := os.ReadFile(dotGit)
 	if err != nil {
 		return dotGit
@@ -220,11 +219,15 @@ func resolveGitDir(worktreePath string) string {
 }
 
 func isMainWorktree(worktreePath string) bool {
-	info, err := os.Stat(filepath.Join(worktreePath, ".git"))
-	if err != nil {
+	if _, err := os.Stat(filepath.Join(worktreePath, ".git")); err != nil {
 		return false
 	}
-	return info.IsDir()
+	return !isLinkedGitDir(resolveGitDir(worktreePath))
+}
+
+func isLinkedGitDir(gitDir string) bool {
+	gitDir = filepath.Clean(gitDir)
+	return filepath.Base(filepath.Dir(gitDir)) == "worktrees"
 }
 
 func classifyEntry(e *Entry, merged map[string]bool) Status {

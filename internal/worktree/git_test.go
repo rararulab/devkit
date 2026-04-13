@@ -206,21 +206,36 @@ func TestIsMainWorktree(t *testing.T) {
 
 	root := t.TempDir()
 	mainPath := filepath.Join(root, "main")
+	separateMainPath := filepath.Join(root, "separate-main")
 	linkedPath := filepath.Join(root, "linked")
 	missingPath := filepath.Join(root, "missing")
+	separateGitDir := filepath.Join(root, "repo.git")
+	linkedGitDir := filepath.Join(separateGitDir, "worktrees", "linked")
 
 	if err := os.MkdirAll(filepath.Join(mainPath, ".git"), 0o750); err != nil {
 		t.Fatalf("mkdir main .git: %v", err)
 	}
+	if err := os.MkdirAll(separateMainPath, 0o750); err != nil {
+		t.Fatalf("mkdir separate main: %v", err)
+	}
 	if err := os.MkdirAll(linkedPath, 0o750); err != nil {
 		t.Fatalf("mkdir linked: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(linkedPath, ".git"), []byte("gitdir: /tmp/gitdir\n"), 0o600); err != nil {
+	if err := os.MkdirAll(linkedGitDir, 0o750); err != nil {
+		t.Fatalf("mkdir linked gitdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(separateMainPath, ".git"), []byte("gitdir: "+separateGitDir+"\n"), 0o600); err != nil {
+		t.Fatalf("write separate main .git file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(linkedPath, ".git"), []byte("gitdir: "+linkedGitDir+"\n"), 0o600); err != nil {
 		t.Fatalf("write linked .git file: %v", err)
 	}
 
 	if !isMainWorktree(mainPath) {
 		t.Fatalf("expected %q to be detected as the main worktree", mainPath)
+	}
+	if !isMainWorktree(separateMainPath) {
+		t.Fatalf("expected %q with separate git dir to be detected as the main worktree", separateMainPath)
 	}
 	if isMainWorktree(linkedPath) {
 		t.Fatalf("expected %q to be detected as a linked worktree", linkedPath)
