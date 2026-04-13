@@ -63,11 +63,6 @@ func List() ([]Entry, error) {
 		return nil, fmt.Errorf("git worktree list: %w", err)
 	}
 
-	mainPath, err := MainPath()
-	if err != nil {
-		return nil, err
-	}
-
 	merged, err := MergedBranches()
 	if err != nil {
 		return nil, err
@@ -83,7 +78,7 @@ func List() ([]Entry, error) {
 
 	// finalizeEntry fills computed fields and returns the entry ready for collection.
 	finalizeEntry := func(e Entry) Entry {
-		e.IsMain = e.Path == mainPath
+		e.IsMain = isMainWorktree(e.Path)
 		e.Prunable = prunable
 		e.Locked = locked
 		e.IsCurrent = isSameOrChild(cwd, e.Path)
@@ -202,6 +197,14 @@ func resolveGitDir(worktreePath string) string {
 	return gitdir
 }
 
+func isMainWorktree(worktreePath string) bool {
+	info, err := os.Stat(filepath.Join(worktreePath, ".git"))
+	if err != nil {
+		return false
+	}
+	return info.IsDir()
+}
+
 func classifyEntry(e *Entry, merged map[string]bool) Status {
 	if e.Prunable {
 		return StatusPrunable
@@ -223,15 +226,6 @@ func isSameOrChild(child, parent string) bool {
 		return child == parent
 	}
 	return c == p || strings.HasPrefix(c, p+string(os.PathSeparator))
-}
-
-// MainPath returns the top-level path of the main checkout.
-func MainPath() (string, error) {
-	out, err := exec.CommandContext(context.Background(), "git", "rev-parse", "--show-toplevel").Output()
-	if err != nil {
-		return "", fmt.Errorf("git rev-parse --show-toplevel: %w", err)
-	}
-	return strings.TrimSpace(string(out)), nil
 }
 
 // MergedBranches returns branch names that are fully merged into main.

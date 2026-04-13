@@ -61,11 +61,6 @@ func runClean() error {
 		return err
 	}
 
-	mainPath, err := MainPath()
-	if err != nil {
-		return err
-	}
-
 	merged, err := MergedBranches()
 	if err != nil {
 		return err
@@ -84,7 +79,7 @@ func runClean() error {
 	removed := 0
 
 	for _, e := range entries {
-		if e.Path == mainPath || e.Branch == "" || !merged[e.Branch] {
+		if !shouldCleanEntry(e, merged) {
 			continue
 		}
 		fmt.Printf("Removing worktree: %s (branch: %s)\n", e.Path, e.Branch)
@@ -116,11 +111,6 @@ func runClean() error {
 }
 
 func runNuke() error {
-	mainPath, err := MainPath()
-	if err != nil {
-		return err
-	}
-
 	entries, err := List()
 	if err != nil {
 		return err
@@ -128,15 +118,13 @@ func runNuke() error {
 
 	removed := 0
 	for _, e := range entries {
-		if e.Path == mainPath {
+		if !shouldNukeEntry(e) {
 			continue
 		}
 		fmt.Printf("Removing: %s\n", e.Path)
 		if err := Remove(e.Path, true); err != nil {
-			fmt.Fprintf(os.Stderr, "  warning: %s — cleaning up manually\n", err)
-			if removeErr := os.RemoveAll(e.Path); removeErr != nil {
-				fmt.Fprintf(os.Stderr, "  warning: manual cleanup failed: %s\n", removeErr)
-			}
+			fmt.Fprintf(os.Stderr, "  warning: %s\n", err)
+			continue
 		}
 		if e.Branch != "" {
 			_ = DeleteBranch(e.Branch, true)
@@ -147,4 +135,12 @@ func runNuke() error {
 	_ = Prune()
 	fmt.Printf("Removed %d worktree(s).\n", removed)
 	return nil
+}
+
+func shouldCleanEntry(e Entry, merged map[string]bool) bool {
+	return !e.Protected() && e.Branch != "" && merged[e.Branch]
+}
+
+func shouldNukeEntry(e Entry) bool {
+	return !e.Protected()
 }
