@@ -83,6 +83,7 @@ func List() ([]Entry, error) {
 
 	// Detect current working directory to mark the active worktree
 	cwd, _ := os.Getwd()
+	currentGitDir := currentWorktreeGitDir()
 
 	var entries []Entry
 	var cur Entry
@@ -91,10 +92,11 @@ func List() ([]Entry, error) {
 
 	// finalizeEntry fills computed fields and returns the entry ready for collection.
 	finalizeEntry := func(e Entry) Entry {
-		e.IsMain = isMainWorktree(e.Path)
+		entryGitDir := entryGitDir(e.Path)
+		e.IsMain = entryGitDir != "" && !isLinkedGitDir(entryGitDir)
 		e.Prunable = prunable
 		e.Locked = locked
-		e.IsCurrent = isSameOrChild(cwd, e.Path)
+		e.IsCurrent = isSameOrChild(cwd, e.Path) || samePath(currentGitDir, entryGitDir)
 		e.Status = classifyEntry(&e, merged)
 		// Populate computed fields for non-prunable entries with existing paths
 		if !e.Prunable {
@@ -168,12 +170,15 @@ func lastActiveTime(path string) time.Time {
 	var latest time.Time
 
 	// Resolve the actual git directory (handles both main checkout and linked worktrees)
-	gitDir := resolveGitDir(path)
-	candidates := []string{
-		filepath.Join(gitDir, "HEAD"),
-		filepath.Join(gitDir, "index"),
-		filepath.Join(path, ".git"), // mtime of .git itself (file or dir)
+	gitDir := entryGitDir(path)
+	var candidates []string
+	if gitDir != "" {
+		candidates = append(candidates,
+			filepath.Join(gitDir, "HEAD"),
+			filepath.Join(gitDir, "index"),
+		)
 	}
+	candidates = append(candidates, filepath.Join(path, ".git")) // mtime of .git itself (file or dir)
 	for _, c := range candidates {
 		if info, err := os.Stat(c); err == nil {
 			if info.ModTime().After(latest) {
@@ -188,6 +193,31 @@ func lastActiveTime(path string) time.Time {
 		}
 	}
 	return latest
+}
+
+func currentWorktreeGitDir() string {
+	out, err := exec.CommandContext(context.Background(), "git", "rev-parse", "--absolute-git-dir").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func entryGitDir(path string) string {
+	if isGitDir(path) {
+		return filepath.Clean(path)
+	}
+	dotGit := filepath.Join(path, ".git")
+	if _, err := os.Stat(dotGit); err != nil {
+		return ""
+	}
+	return resolveGitDir(path)
+}
+
+func isGitDir(path string) bool {
+	headInfo, headErr := os.Stat(filepath.Join(path, "HEAD"))
+	configInfo, configErr := os.Stat(filepath.Join(path, "config"))
+	return headErr == nil && !headInfo.IsDir() && configErr == nil && !configInfo.IsDir()
 }
 
 // resolveGitDir returns the path to the actual git directory for a worktree.
@@ -219,10 +249,11 @@ func resolveGitDir(worktreePath string) string {
 }
 
 func isMainWorktree(worktreePath string) bool {
-	if _, err := os.Stat(filepath.Join(worktreePath, ".git")); err != nil {
+	gitDir := entryGitDir(worktreePath)
+	if gitDir == "" {
 		return false
 	}
-	return !isLinkedGitDir(resolveGitDir(worktreePath))
+	return !isLinkedGitDir(gitDir)
 }
 
 func isLinkedGitDir(gitDir string) bool {
@@ -251,6 +282,18 @@ func isSameOrChild(child, parent string) bool {
 		return child == parent
 	}
 	return c == p || strings.HasPrefix(c, p+string(os.PathSeparator))
+}
+
+func samePath(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	x, err1 := filepath.EvalSymlinks(a)
+	y, err2 := filepath.EvalSymlinks(b)
+	if err1 != nil || err2 != nil {
+		return filepath.Clean(a) == filepath.Clean(b)
+	}
+	return x == y
 }
 
 // MergedBranches returns branch names that are fully merged into main.
