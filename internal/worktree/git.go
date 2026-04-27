@@ -139,15 +139,22 @@ func List() ([]Entry, error) {
 	return entries, nil
 }
 
-// dirSize computes total disk usage of a directory tree in bytes.
-// Returns 0 on any error.
+// dirSize computes total disk usage of a worktree's working files in bytes.
+// Skips the .git directory so the main checkout's size is comparable with
+// linked worktrees (whose .git is a tiny gitdir pointer). Returns 0 on error.
 func dirSize(path string) int64 {
 	var total int64
-	_ = filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {
+	_ = filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // skip unreadable entries
 		}
+		if d.IsDir() && d.Name() == ".git" && p != path {
+			return filepath.SkipDir
+		}
 		if !d.IsDir() {
+			if filepath.Base(p) == ".git" && filepath.Dir(p) == path {
+				return nil // linked worktree gitdir pointer file
+			}
 			if info, err := d.Info(); err == nil {
 				total += info.Size()
 			}

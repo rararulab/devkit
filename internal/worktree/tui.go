@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"charm.land/bubbles/v2/table"
@@ -323,14 +324,14 @@ func (m *tuiModel) pushToast(text string) tea.Cmd {
 	})
 }
 
-// chromeLines is the number of vertical lines consumed by non-table UI elements:
-// title (1) + margin (1) + blank (2) + post-table blank (2) + help (1) + trailing newline (1) = 8.
-const chromeLines = 8
+// chromeLines is the vertical budget consumed by non-table UI:
+// title (1) + blank (1) + blank-after-table (1) + help (1) + safety (1) = 5.
+const chromeLines = 5
 
 // tableHeight computes the ideal table height based on terminal size and entry count.
-// Falls back to a sensible default when the terminal size is not yet known.
+// The +2 accounts for the bubbles table header (1 row + 1 border line).
 func (m *tuiModel) tableHeight() int {
-	rows := len(m.entries) + 1 // +1 for header
+	rows := len(m.entries) + 2
 	if m.windowHeight > 0 {
 		available := m.windowHeight - chromeLines
 		if available < 5 {
@@ -338,7 +339,6 @@ func (m *tuiModel) tableHeight() int {
 		}
 		return min(rows, available)
 	}
-	// Before first WindowSizeMsg, use a conservative default
 	return min(rows, 25)
 }
 
@@ -346,13 +346,16 @@ func (m *tuiModel) Init() tea.Cmd {
 	return m.computeSizesCmd()
 }
 
-// computeSizesCmd returns a tea.Cmd that computes disk sizes for all entries in the background.
-// Captures the current generation to discard stale results after a reload.
+// computeSizesCmd returns a tea.Cmd that computes disk sizes for all entries
+// concurrently, one goroutine per worktree. Captures the current generation
+// to discard stale results after a reload.
 func (m *tuiModel) computeSizesCmd() tea.Cmd {
 	entries := m.entries
 	gen := m.generation
 	return func() tea.Msg {
 		sizes := make(map[int]int64, len(entries))
+		var mu sync.Mutex
+		var wg sync.WaitGroup
 		for i, e := range entries {
 			if e.Prunable {
 				continue
@@ -360,8 +363,16 @@ func (m *tuiModel) computeSizesCmd() tea.Cmd {
 			if _, err := os.Stat(e.Path); err != nil {
 				continue
 			}
-			sizes[i] = dirSize(e.Path)
+			wg.Add(1)
+			go func(i int, path string) {
+				defer wg.Done()
+				sz := dirSize(path)
+				mu.Lock()
+				sizes[i] = sz
+				mu.Unlock()
+			}(i, e.Path)
 		}
+		wg.Wait()
 		return sizeResultMsg{generation: gen, sizes: sizes}
 	}
 }
@@ -501,8 +512,8 @@ func (m *tuiModel) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "space":
-		m.toggleSelection()
-		return m, nil
+		cmd := m.toggleSelection()
+		return m, cmd
 
 	case "a":
 		m.selectAllMerged()
@@ -558,17 +569,33 @@ func (m *tuiModel) handleConfirmKey(key string) (tea.Model, tea.Cmd) {
 }
 
 // toggleSelection toggles the selection state of the cursor entry.
-func (m *tuiModel) toggleSelection() {
+// Returns a status-message Cmd when the entry is protected and can't be selected.
+func (m *tuiModel) toggleSelection() tea.Cmd {
 	idx := m.table.Cursor()
-	if idx < len(m.entries) && !m.entries[idx].Protected() {
-		if m.selected[idx] {
-			delete(m.selected, idx)
-		} else {
-			m.selected[idx] = true
-			m.table.MoveDown(1)
-		}
-		m.refreshRows()
+	if idx >= len(m.entries) {
+		return nil
 	}
+	e := &m.entries[idx]
+	if e.Protected() {
+		reason := "protected"
+		switch {
+		case e.IsMain:
+			reason = "main worktree"
+		case e.IsCurrent:
+			reason = "current working directory"
+		case e.Locked:
+			reason = "locked"
+		}
+		return m.setMessage(fmt.Sprintf("Cannot select: %s", reason))
+	}
+	if m.selected[idx] {
+		delete(m.selected, idx)
+	} else {
+		m.selected[idx] = true
+		m.table.MoveDown(1)
+	}
+	m.refreshRows()
+	return nil
 }
 
 // selectAllMerged selects all merged, non-protected worktrees.
@@ -673,6 +700,15 @@ func (m *tuiModel) reloadCmd() tea.Cmd {
 	}
 }
 
+// totalSize sums DiskSize across all entries.
+func (m *tuiModel) totalSize() int64 {
+	var total int64
+	for i := range m.entries {
+		total += m.entries[i].DiskSize
+	}
+	return total
+}
+
 func (m *tuiModel) refreshRows() {
 	rows := make([]table.Row, len(m.entries))
 	for i := range m.entries {
@@ -722,12 +758,20 @@ func (m *tuiModel) View() tea.View {
 
 	var b strings.Builder
 
-	// Title bar with worktree count
+	// Title bar with worktree count and total size
 	selected := len(m.selected)
 	title := "Worktree Manager"
-	counter := styleCount.Render(fmt.Sprintf("  %d worktrees", len(m.entries)))
+	var counter string
 	if selected > 0 {
 		counter = styleCheck.Render(fmt.Sprintf("  %d selected", selected))
+	} else {
+		summary := fmt.Sprintf("  %d worktrees", len(m.entries))
+		if m.sizesLoaded {
+			summary += fmt.Sprintf(" · %s total", humanSize(m.totalSize()))
+		} else {
+			summary += " · sizing..."
+		}
+		counter = styleCount.Render(summary)
 	}
 	b.WriteString(styleTitle.Render(title) + counter)
 	b.WriteString("\n\n")
