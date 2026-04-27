@@ -23,10 +23,9 @@ func TestShouldCleanEntry(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := shouldCleanEntry(tc.entry, merged); got != tc.want {
+			if got := shouldCleanEntry(&tc.entry, merged); got != tc.want {
 				t.Fatalf("shouldCleanEntry(%+v) = %v, want %v", tc.entry, got, tc.want)
 			}
 		})
@@ -48,10 +47,9 @@ func TestShouldNukeEntry(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := shouldNukeEntry(tc.entry); got != tc.want {
+			if got := shouldNukeEntry(&tc.entry); got != tc.want {
 				t.Fatalf("shouldNukeEntry(%+v) = %v, want %v", tc.entry, got, tc.want)
 			}
 		})

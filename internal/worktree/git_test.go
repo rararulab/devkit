@@ -303,10 +303,10 @@ func TestListProtectsSeparateGitDirMainWorktree(t *testing.T) {
 		t.Fatalf("expected separate-git-dir main entry to be protected: %+v", *mainEntry)
 	}
 	merged := map[string]bool{mainEntry.Branch: true}
-	if shouldCleanEntry(*mainEntry, merged) {
+	if shouldCleanEntry(mainEntry, merged) {
 		t.Fatalf("expected main entry to be skipped by clean: %+v", *mainEntry)
 	}
-	if shouldNukeEntry(*mainEntry) {
+	if shouldNukeEntry(mainEntry) {
 		t.Fatalf("expected main entry to be skipped by nuke: %+v", *mainEntry)
 	}
 
@@ -318,14 +318,13 @@ func TestListProtectsSeparateGitDirMainWorktree(t *testing.T) {
 	}
 }
 
-func runGit(t *testing.T, dir string, args ...string) string {
+func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 
-	cmd := exec.Command("git", args...)
+	cmd := exec.CommandContext(t.Context(), "git", args...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %s (dir=%s): %v\n%s", strings.Join(args, " "), dir, err, out)
 	}
-	return strings.TrimSpace(string(out))
 }

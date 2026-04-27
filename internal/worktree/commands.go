@@ -143,7 +143,8 @@ func runClean(dryRun bool) error {
 		prefix = "(dry-run) "
 	}
 
-	for _, e := range entries {
+	for i := range entries {
+		e := &entries[i]
 		if !shouldCleanEntry(e, merged) {
 			continue
 		}
@@ -196,7 +197,8 @@ func runNuke() error {
 	}
 
 	removed := 0
-	for _, e := range entries {
+	for i := range entries {
+		e := &entries[i]
 		if !shouldNukeEntry(e) {
 			continue
 		}
@@ -220,10 +222,10 @@ func runNuke() error {
 	return nil
 }
 
-func shouldCleanEntry(e Entry, merged map[string]bool) bool {
+func shouldCleanEntry(e *Entry, merged map[string]bool) bool {
 	return !e.Protected() && e.Branch != "" && merged[e.Branch]
 }
 
-func shouldNukeEntry(e Entry) bool {
+func shouldNukeEntry(e *Entry) bool {
 	return !e.Protected()
 }
