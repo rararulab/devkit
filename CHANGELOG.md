@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-04-27
+
+### ⚙️ Miscellaneous
+
+- Add ralph autonomous agent loop setup
+
+### 🐛 Bug Fixes
+
+- Harden error handling, add unit tests
+- **wt:** Tui sizing, layout, selection feedback
+- **wt:** Satisfy lint after pr2 merge
+
+### 🚀 Features
+
+- **wt:** Rich ls output, tui cleanup ux
+
 ## [0.2.0] - 2026-03-20
 
 ### ⚙️ Miscellaneous
